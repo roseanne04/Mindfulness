@@ -4,8 +4,10 @@ const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
 const { Pool } = require("pg")
 require("dotenv").config()
+const path = require("path")
 
 const app = express()
+// FIXED: Use Render's PORT environment variable
 const PORT = process.env.PORT || 3000
 
 // Database connection
@@ -14,10 +16,66 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 })
 
+// Test database connection
+pool.connect((err, client, release) => {
+  if (err) {
+    console.error('Error connecting to database:', err.stack)
+  } else {
+    console.log('Connected to database successfully')
+    release()
+  }
+})
+
 // Middleware
 app.use(cors())
 app.use(express.json())
+
+// Serve static files from public directory
 app.use(express.static("public"))
+
+// Root route - serve login page
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login.html"))
+})
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "OK", 
+    timestamp: new Date().toISOString(),
+    port: PORT,
+    env: process.env.NODE_ENV 
+  })
+})
+
+// Serve specific HTML files
+app.get("/login.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login.html"))
+})
+
+app.get("/signup.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "signup.html"))
+})
+
+app.get("/home.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "home.html"))
+})
+
+app.get("/journal.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "journal.html"))
+})
+
+app.get("/support.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "support.html"))
+})
+
+app.get("/connect.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "connect.html"))
+})
+
+app.get("/profile.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "profile.html"))
+})
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production"
@@ -40,12 +98,17 @@ const authenticateToken = (req, res, next) => {
   })
 }
 
-// Routes
+// API Routes
 
 // User Authentication
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body
+
+    // Validate input
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "All fields are required" })
+    }
 
     // Check if user exists
     const existingUser = await pool.query("SELECT * FROM users WHERE email = $1", [email])
@@ -86,6 +149,11 @@ app.post("/api/auth/signup", async (req, res) => {
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body
+
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" })
+    }
 
     // Find user
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email])
@@ -387,11 +455,11 @@ app.get("/api/stats", authenticateToken, async (req, res) => {
     ])
 
     res.json({
-      journalEntries: Number.parseInt(journalCount.rows[0].count),
-      moodEntries: Number.parseInt(moodCount.rows[0].count),
-      gratitudeEntries: Number.parseInt(gratitudeCount.rows[0].count),
-      totalUsers: Number.parseInt(totalUsers.rows[0].count) - 1, // Exclude current user
-      friendRequests: Number.parseInt(friendRequestsCount.rows[0].count),
+      journalEntries: parseInt(journalCount.rows[0].count),
+      moodEntries: parseInt(moodCount.rows[0].count),
+      gratitudeEntries: parseInt(gratitudeCount.rows[0].count),
+      totalUsers: parseInt(totalUsers.rows[0].count) - 1, // Exclude current user
+      friendRequests: parseInt(friendRequestsCount.rows[0].count),
     })
   } catch (error) {
     console.error("Stats fetch error:", error)
@@ -399,14 +467,38 @@ app.get("/api/stats", authenticateToken, async (req, res) => {
   }
 })
 
-// Health check
+// API Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date().toISOString() })
 })
 
-// Start server
-app.listen(PORT, () => {
+// Catch-all handler for SPA routing
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login.html"))
+})
+
+// FIXED: Start server with proper host binding for Render
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`)
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`)
+  console.log(`Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`)
+})
+
+// Handle server errors
+server.on('error', (err) => {
+  console.error('Server error:', err)
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use`)
+  }
+})
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully')
+  server.close(() => {
+    console.log('Process terminated')
+    pool.end()
+  })
 })
 
 module.exports = app
