@@ -17,7 +17,7 @@ const pool = new Pool({
 // Middleware
 app.use(cors())
 app.use(express.json())
-app.use(express.static("frontend"))
+app.use(express.static("public"))
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production"
